@@ -20,8 +20,9 @@
 // Yaw gear ratio: 8:80
 #define YawGearRatio 10
 
-// Number of microsteps per step
+// Initial number of microsteps per step
 // Multiples of 2, 1 to 32
+// Set to 32 for fine control, 8 for coarse
 #define StepRes 32
 
 // Max speed in steps/sec
@@ -103,6 +104,8 @@ int readJoystick(int Xpin, int Ypin) {
   if (abs(x) > threshold || abs(y) > threshold) {  // Map the values to speeds
     az.setSpeed(xSpeed);
     alt.setSpeed(ySpeed);
+    az.move(8);
+    alt.move(8);
 
     // Debugging
     Serial.print("x: ");
@@ -142,9 +145,9 @@ void setup()  // setup stuff
   alt.setMaxSpeed(maxSpeed);
   az.setMaxSpeed(maxSpeed);
 
-  // set acceleration (doesn't work)
-  alt.setAcceleration(.1);
-  az.setAcceleration(.1);
+  // set acceleration
+  alt.setAcceleration(0.01);
+  az.setAcceleration(0.01);
 }
 
 void loop()  // loop
