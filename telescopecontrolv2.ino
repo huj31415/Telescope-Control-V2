@@ -47,7 +47,9 @@
 #define threshold 24
 
 // Mode switch button pin
-#define modeBtn 10
+#define modeBtn 7
+
+long long millisec;
 
 // // Joystick offsets compensate for drift
 // byte xOffset;
@@ -58,8 +60,8 @@ AccelStepper az(AccelStepper::DRIVER, PitchStep, PitchDir);
 AccelStepper alt(AccelStepper::DRIVER, YawStep, YawDir);
 
 // initialize sidereal objects and planets
-SiderealObjects objects;
 SiderealPlanets planets;
+SiderealObjects objects;
 
 // possible states
 enum State {
@@ -68,11 +70,33 @@ enum State {
   AUTOAIM,
   TRACK
 };
+
 volatile State currentState = COARSE;
 
-// old
-// volatile bool fine = false;
+// large objects for use with SiderealPlanets
+enum Objects {
+  SUN,
+  MOON,
+  MERCURY,
+  VENUS,
+  MARS,
+  JUPITER,
+  SATURN,
+  URANUS,
+  NEPTUNE
+};
 
+struct Data {
+  // alt az
+  double alt;
+  double az;
+  // ra dec
+  double ra;
+  double dec;
+  // rise set in hrs since midnight
+  double rise;
+  double set;
+};
 
 // Set the resolution (microsteps/step) of the steppers. The res pins are common to both so it is only done once.
 // Resolution is 1-32, multiples of 2.
@@ -85,12 +109,6 @@ void setRes(byte res = 32) {
 
 // Joystick interrupt service routine to switch between coarse and fine manual control
 void changeRes() {
-  // fine = !fine;
-  // fine == true ? setRes(MaxStepRes) : setRes(MaxStepRes / 4);
-  // Serial.println("Resolution Change");
-
-  // currentState = (currentState == COARSE) ? (setRes(MaxStepRes), FINE) : (setRes(MaxStepRes / 4), COARSE);
-
   if (currentState == COARSE) {
     currentState = FINE;
     setRes(MaxStepRes);
@@ -130,6 +148,49 @@ void manualControl() {
   az.run();
 }
 
+void autoAim(Objects target) {
+  Data planet;
+  switch (target) {
+    // do other stuff like rise/set for each
+    case SUN:
+      planets.doSun();
+      planets.doSunRiseSetTimes();
+      break;
+    case MOON:
+      planets.doMoon();
+      planets.doMoonRiseSetTimes();
+      planets.doLunarParallax();
+      break;
+    case MERCURY:
+      planets.doMercury();
+      break;
+    case VENUS:
+      planets.doVenus();
+      break;
+    case MARS:
+      planets.doMars();
+      break;
+    case JUPITER:
+      planets.doJupiter();
+      break;
+    case SATURN:
+      planets.doSaturn();
+      break;
+    case URANUS:
+      planets.doUranus();
+      break;
+    case NEPTUNE:
+      planets.doNeptune();
+      break;
+  }
+  // doRefractionC(pressure, temperature in C) // integrate BMP280 sensor to get these, for no refraction compensation for now
+  planet.alt = planets.getAltitude();
+  planet.az = planets.getAzimuth();
+  Serial.print(planet.alt);
+  Serial.print(",");
+  Serial.println(planet.az);
+}
+
 void setup()  // setup stuff
 {
   // set joystick pin modes to input
@@ -158,9 +219,27 @@ void setup()  // setup stuff
   // manualControl();
   // alt.setCurrentPosition();
   // az.setCurrentPosition();
+
+  // Init planets, integrate GPS module to get these
+  planets.begin();
+  planets.setTimeZone(-5);  // Relative to GMT - EST = GMT-5
+  planets.useAutoDST();
+  planets.setLatLong(41.8, -72.9);  // Avon, CT
+  planets.setGMTdate(2023, 6, 19);
+  planets.setGMTtime(20, 20, 0);
+
+  // for debugging only
+  currentState = AUTOAIM;
 }
 
 void loop()  // loop
 {
-  manualControl();
+  if (currentState == COARSE || currentState == FINE) {
+    manualControl();
+  } else if (currentState == AUTOAIM) {
+    // get target planet info
+    // autoAim(JUPITER);
+  } else if (currentState == TRACK) {
+    // track
+  }
 }
