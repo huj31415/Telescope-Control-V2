@@ -189,6 +189,8 @@ void autoAim(Objects target) {
   Serial.print(planet.alt);
   Serial.print(",");
   Serial.println(planet.az);
+
+  // after getting coords, calculate distance between current position and target, then move (taking into account the gear ratios)
 }
 
 void setup()  // setup stuff
