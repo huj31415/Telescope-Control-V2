@@ -5,8 +5,8 @@
 // Define the stepper control pins
 #define PitchDir 8
 #define PitchStep 9
-#define YawDir 6
-#define YawStep 7
+#define YawDir 16
+#define YawStep 10
 
 // Resolution pins (common)
 #define M0 5
@@ -61,12 +61,22 @@ AccelStepper alt(AccelStepper::DRIVER, YawStep, YawDir);
 SiderealObjects objects;
 SiderealPlanets planets;
 
-// fine adjustment state
-volatile bool fine = false;
+// possible states
+enum State {
+  COARSE,
+  FINE,
+  AUTOAIM,
+  TRACK
+};
+volatile State currentState = COARSE;
+
+// old
+// volatile bool fine = false;
+
 
 // Set the resolution (microsteps/step) of the steppers. The res pins are common to both so it is only done once.
 // Resolution is 1-32, multiples of 2.
-void setRes(int res = 32) {
+void setRes(byte res = 32) {
   int x = log(res) / log(2);
   digitalWrite(M0, (x & 1) == 0 ? LOW : HIGH);
   digitalWrite(M1, (x & 2) == 0 ? LOW : HIGH);
@@ -75,14 +85,19 @@ void setRes(int res = 32) {
 
 // Joystick interrupt service routine to switch between coarse and fine manual control
 void changeRes() {
-  fine = !fine;
-  fine == true ? setRes(MaxStepRes) : setRes(MaxStepRes / 4);
-  Serial.println("Resolution Change");
-}
+  // fine = !fine;
+  // fine == true ? setRes(MaxStepRes) : setRes(MaxStepRes / 4);
+  // Serial.println("Resolution Change");
 
-// Mode change button ISR to toggle tracking, etc.
-void changeMode() {
-  //
+  // currentState = (currentState == COARSE) ? (setRes(MaxStepRes), FINE) : (setRes(MaxStepRes / 4), COARSE);
+
+  if (currentState == COARSE) {
+    currentState = FINE;
+    setRes(MaxStepRes);
+  } else if (currentState == FINE) {
+    currentState = COARSE;
+    setRes(MaxStepRes / 4);
+  }
 }
 
 // Read the x/y values of the joystick and move the motors accordingly
@@ -110,6 +125,9 @@ void manualControl() {
     alt.setSpeed(0);
   }
 
+  // move the motors
+  alt.run();
+  az.run();
 }
 
 void setup()  // setup stuff
@@ -122,9 +140,6 @@ void setup()  // setup stuff
   pinMode(joystickB, INPUT_PULLUP);
   attachInterrupt(digitalPinToInterrupt(joystickB), changeRes, FALLING);
 
-  pinMode(modeBtn, INPUT_PULLUP)
-  attachInterrupt(digitalPinToInterrupt(modeBtn), changeMode, FALLING);
-
   // init serial for debugging
   Serial.begin(9600);
 
@@ -136,8 +151,8 @@ void setup()  // setup stuff
   az.setMaxSpeed(maxSpeed);
 
   // set acceleration
-  alt.setAcceleration(0.01);
-  az.setAcceleration(0.01);
+  alt.setAcceleration(1);
+  az.setAcceleration(1);
 
   // // Aim at Polaris to establish relative position
   // manualControl();
