@@ -60,8 +60,8 @@ AccelStepper az(AccelStepper::DRIVER, PitchStep, PitchDir);
 AccelStepper alt(AccelStepper::DRIVER, YawStep, YawDir);
 
 // initialize sidereal objects and planets
-SiderealPlanets planets;
-SiderealObjects objects;
+SiderealPlanets SPlanets;
+SiderealObjects SObjects;
 
 // possible states
 enum State {
@@ -86,16 +86,16 @@ enum Objects {
   NEPTUNE
 };
 
-struct Data {
-  // alt az
+struct Coord {
+  // alt az in degrees
   double alt;
   double az;
   // ra dec
-  double ra;
-  double dec;
-  // rise set in hrs since midnight
-  double rise;
-  double set;
+  double ra; // RA in hrs
+  double dec; // Dec in deg
+  // // rise set in hrs since midnight
+  // double rise;
+  // double set;
 };
 
 // Set the resolution (microsteps/step) of the steppers. The res pins are common to both so it is only done once.
@@ -149,48 +149,55 @@ void manualControl() {
 }
 
 void autoAim(Objects target) {
-  Data planet;
+  Coord planet;
   switch (target) {
     // do other stuff like rise/set for each
     case SUN:
-      planets.doSun();
-      planets.doSunRiseSetTimes();
+      SPlanets.doSun();
+      //planets.doSunRiseSetTimes();
       break;
     case MOON:
-      planets.doMoon();
-      planets.doMoonRiseSetTimes();
-      planets.doLunarParallax();
+      SPlanets.doMoon();
+      //planets.doMoonRiseSetTimes();
+      SPlanets.doLunarParallax();
       break;
     case MERCURY:
-      planets.doMercury();
+      SPlanets.doMercury();
       break;
     case VENUS:
-      planets.doVenus();
+      SPlanets.doVenus();
       break;
     case MARS:
-      planets.doMars();
+      SPlanets.doMars();
       break;
     case JUPITER:
-      planets.doJupiter();
+      SPlanets.doJupiter();
       break;
     case SATURN:
-      planets.doSaturn();
+      SPlanets.doSaturn();
       break;
     case URANUS:
-      planets.doUranus();
+      SPlanets.doUranus();
       break;
     case NEPTUNE:
-      planets.doNeptune();
+      SPlanets.doNeptune();
       break;
   }
-  // doRefractionC(pressure, temperature in C) // integrate BMP280 sensor to get these, for no refraction compensation for now
-  planet.alt = planets.getAltitude();
-  planet.az = planets.getAzimuth();
+  planet.ra = SPlanets.getRAdec();
+  planet.dec = SPlanets.getDeclinationDec();
+
+  SPlanets.setRAdec(planet.ra, planet.dec);
+  SPlanets.doRAdec2AltAz();
+  // planets.doRefractionC(pressure, temperature in C) // integrate BMP280 sensor to get these, for no refraction compensation for now
+  planet.alt = SPlanets.getAltitude();
+  planet.az = SPlanets.getAzimuth();
+
+  Serial.print(F("Alt, Az: "));
   Serial.print(planet.alt);
-  Serial.print(",");
+  Serial.print(F(","));
   Serial.println(planet.az);
 
-  // after getting coords, calculate distance between current position and target, then move (taking into account the gear ratios)
+  // after getting coords, ensure it is above horizon, then calculate distance between current position and target, then move accordingly (taking into account the gear ratios)
 }
 
 void setup()  // setup stuff
@@ -217,30 +224,28 @@ void setup()  // setup stuff
   alt.setAcceleration(1);
   az.setAcceleration(1);
 
-  // // Aim at Polaris to establish relative position
-  // manualControl();
-  // alt.setCurrentPosition();
-  // az.setCurrentPosition();
-
   // Init planets, integrate GPS module to get these
-  planets.begin();
-  planets.setTimeZone(-5);  // Relative to GMT - EST = GMT-5
-  planets.useAutoDST();
-  planets.setLatLong(41.8, -72.9);  // Avon, CT
-  planets.setGMTdate(2023, 6, 19);
-  planets.setGMTtime(20, 20, 0);
+  SPlanets.begin();
+  SPlanets.setTimeZone(-5);  // Relative to GMT - EST = GMT-5
+  SPlanets.useAutoDST();
 
-  // for debugging only
+  // get these from gps module
+  SPlanets.setLatLong(41.8, -72.9);  // Avon, CT
+  SPlanets.setGMTdate(2023, 6, 20);
+  SPlanets.setGMTtime(19, 12, 0);
+
+  // for debugging and testing
   currentState = AUTOAIM;
+
+  autoAim(SUN); // for some reason venus, jupiter, saturn don't work
 }
 
 void loop()  // loop
 {
   if (currentState == COARSE || currentState == FINE) {
-    manualControl();
+    // manualControl();
   } else if (currentState == AUTOAIM) {
     // get target planet info
-    // autoAim(JUPITER);
   } else if (currentState == TRACK) {
     // track
   }
