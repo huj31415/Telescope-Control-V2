@@ -3,7 +3,6 @@
 #include <AccelStepper.h>
 #include <SiderealPlanets.h>
 // #include <SiderealObjects.h>
-#include <avr/pgmspace.h>
 
 // Define the stepper control pins
 #define AltDir 8
