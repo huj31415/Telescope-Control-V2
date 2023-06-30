@@ -1,8 +1,4 @@
-#define debug_sidereal_planets
-
 #include <AccelStepper.h>
-#include <SiderealPlanets.h>
-// #include <SiderealObjects.h>
 
 // Define the stepper control pins
 #define AltDir 8
@@ -55,10 +51,6 @@
 AccelStepper az(AccelStepper::DRIVER, AltStep, AltDir);
 AccelStepper alt(AccelStepper::DRIVER, AzStep, AzDir);
 
-// initialize sidereal objects and planets
-SiderealPlanets Planets;
-// SiderealObjects Stars;
-
 // possible program states
 enum State {
   COARSE,
@@ -97,7 +89,7 @@ struct Coord {
 Coord planet;
 
 // Set the resolution (microsteps/step) of the steppers. The res pins are common to both so it is only done once.
-// Resolution is 1-32, multiples of 2.
+// Resolution is 1-32, powers of 2.
 void setRes(int res = 32) {
   int x = log(res) / log(2);
   digitalWrite(M0, (x & 1) == 0 ? LOW : HIGH);
@@ -133,6 +125,8 @@ void manualControl() {
     // Move to implement acceleration (?)
     az.move(8);
     alt.move(8);
+    
+    Serial.println("moved");
 
   } else {
     // Ignore small variations below the Threshold
@@ -145,67 +139,6 @@ void manualControl() {
   // move the motors
   alt.run();
   az.run();
-}
-
-void autoAim(Objects target) {
-
-  // Planets.doPlans(target); // uses extra 10% program storage space - might be better for actual use
-  Serial.println("calcs done");
-
-  switch (target) {
-    // do other stuff like rise/set for each
-    case SUN:
-      Planets.doSun();
-      //planets.doSunRiseSetTimes();
-      break;
-    case MOON:
-      Planets.doMoon();
-      //planets.doMoonRiseSetTimes();
-      //Planets.doLunarParallax(); // requires elevation
-      break;
-    case MERCURY:
-      Planets.doMercury();
-      break;
-    case VENUS:
-      Planets.doVenus();
-      break;
-    case MARS:
-      Planets.doMars();
-      break;
-    case JUPITER:
-      Planets.doJupiter();
-      break;
-    case SATURN:
-      Planets.doSaturn();
-      break;
-    case URANUS:
-      Planets.doUranus();
-      break;
-    case NEPTUNE:
-      Planets.doNeptune();
-      break;
-  }
-  planet.ra = Planets.getRAdec();
-  planet.dec = Planets.getDeclinationDec();
-
-  Serial.println("radec done");
-
-  Planets.setRAdec(planet.ra, planet.dec);
-  Planets.doRAdec2AltAz();
-  planet.alt = Planets.getAltitude();
-  planet.az = Planets.getAzimuth();
-
-  Serial.println("altaz done");
-
-  // Planets.setAltAz(planet.alt, planet.az);
-  // Planets.doRefractionC(pressure, temperature in C); // integrate BMP280 sensor to get these, for no refraction compensation for now
-
-  Serial.print("Alt, Az: ");
-  Serial.print(planet.alt);
-  Serial.print(",");
-  Serial.println(planet.az);
-
-  // after getting coords, ensure it is above horizon, then calculate distance between current position and target, then move accordingly (taking into account the gear ratios)
 }
 
 void setup()
@@ -231,33 +164,16 @@ void setup()
   // set acceleration
   alt.setAcceleration(1);
   az.setAcceleration(1);
-
-  // Init planets, integrate GPS module to get these
-  Planets.begin();
-  Planets.setTimeZone(-5);  // Relative to GMT: EST = GMT-5
-  Planets.useAutoDST();
-
-  // get these from gps module
-  Planets.setLatLong(41.8, -72.9);  // Avon, CT
-  Planets.setGMTdate(2023, 6, 23);
-  Planets.setGMTtime(18, 9, 0);
-
-  // for debugging and testing
-  currentState = AUTOAIM;
-
-  autoAim(MARS); // for some reason venus, jupiter, saturn don't work
 }
 
 void loop()
-{/*
+{
   if (currentState == COARSE || currentState == FINE) {
-    // manualControl();
+    manualControl();
   } else if (currentState == AUTOAIM) {
     // get target planet info, then aim
   } else if (currentState == TRACK) {
     // aim then track either by calculating position every loop or aiming in a circle around polaris
-  }*/
-  while(1);
+  }
 }
 
-g
