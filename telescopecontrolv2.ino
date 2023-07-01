@@ -41,12 +41,13 @@
 // Initial number of microsteps per step
 // Multiples of 2, 1 to 32 for DRV8825
 // Set to 32 for fine control, 8 for coarse
-#define MaxStepRes 32
-#define FineAdjRes MaxStepRes
-#define CoarseAdjRes MaxStepRes / 4
+// #define MaxStepRes 32
+// #define FineAdjRes MaxStepRes
+// #define CoarseAdjRes MaxStepRes / 4
 
 // Max speed in steps/sec
-#define MaxSpeed 100 * MaxStepRes
+#define MaxFineSpeed 100
+#define MaxCoarseSpeed 2000
 
 // Length of a sidereal day in milliseconds
 #define SiderealDayMillis 86164090.5
@@ -74,11 +75,10 @@ enum State {
 // program current state
 volatile State currentState;
 
-// current resolution of steppers
-volatile int currentRes;
-
 // steps per revolution accounting for microsteps
 volatile int stepsPerRevolution;
+
+volatile bool fine = false;
 
 // vars for simple tracking
 double altRad, azRad, radDistToPole, altTarget, azTarget;
@@ -117,25 +117,26 @@ Coord planet;
 
 // Set the resolution (microsteps/step) of the steppers. The res pins are common to both so it is only done once.
 // Resolution is 1-32, powers of 2.
-void setRes(int res = 32) {
-  int x = log(res) / log(2);
-  digitalWrite(M0, (x & 1) == 0 ? LOW : HIGH);
-  digitalWrite(M1, (x & 2) == 0 ? LOW : HIGH);
-  digitalWrite(M2, (x & 4) == 0 ? LOW : HIGH);
-  currentRes = res;
-}
+// void setRes(int res = 32) {
+//   int x = log(res) / log(2);
+//   digitalWrite(M0, (x & 1) == 0 ? LOW : HIGH);
+//   digitalWrite(M1, (x & 2) == 0 ? LOW : HIGH);
+//   digitalWrite(M2, (x & 4) == 0 ? LOW : HIGH);
+//   currentRes = res;
+// }
 
 // Joystick interrupt service routine to switch between coarse and fine manual control
-void changeRes() {
-  if (currentRes == CoarseAdjRes) {
-    // fine adjustment state
-    setRes(FineAdjRes);
-    stepsPerRevolution = 200 * FineAdjRes;
-  } else if (currentRes == FineAdjRes) {
-    // coarse adjustment state
-    setRes(CoarseAdjRes);
-    stepsPerRevolution = 200 * CoarseAdjRes;
-  }
+void changeSpeed() {
+  //   if (currentRes == CoarseAdjRes) {
+  //     // fine adjustment state
+  //     setRes(FineAdjRes);
+  //     stepsPerRevolution = 200 * FineAdjRes;
+  //   } else if (currentRes == FineAdjRes) {
+  //     // coarse adjustment state
+  //     setRes(CoarseAdjRes);
+  //     stepsPerRevolution = 200 * CoarseAdjRes;
+  //   }
+  fine = !fine;
 }
 
 // ISR to switch modes from calibration/polaris aiming to tracking
@@ -166,8 +167,9 @@ void stickControl() {
   // Check if the joystick values are above the Threshold to reduce drift or noise, then map + set speeds
   if (abs(x) > Threshold || abs(y) > Threshold) {
     // Map joystick values to speeds
-    az.setSpeed(map(x, -512, 512, -MaxSpeed, MaxSpeed));
-    alt.setSpeed(map(y, -512, 512, -MaxSpeed, MaxSpeed));
+    int speed = fine ? MaxFineSpeed : MaxCoarseSpeed;
+    az.setSpeed(map(x, -512, 512, -speed, speed));
+    alt.setSpeed(map(y, -512, 512, -speed, speed));
 
     // Move to implement acceleration (?)
     az.move(1);
@@ -215,18 +217,18 @@ void setup() {
 
   // set joystick button pin to input - only pins 2 and 3 are interrupt pins
   pinMode(JoystickB, INPUT_PULLUP);
-  attachInterrupt(digitalPinToInterrupt(JoystickB), changeRes, RISING);
+  attachInterrupt(digitalPinToInterrupt(JoystickB), changeSpeed, RISING);
 
   // set control btn pin to input
   pinMode(ModeBtn, INPUT_PULLUP);
   attachInterrupt(digitalPinToInterrupt(ModeBtn), changeMode, RISING);
 
   // set stepper resolution
-  setRes(CoarseAdjRes);
+  //setRes(CoarseAdjRes);
 
   // set stepper max speed
-  alt.setMaxSpeed(MaxSpeed);
-  az.setMaxSpeed(MaxSpeed);
+  alt.setMaxSpeed(MaxCoarseSpeed);
+  az.setMaxSpeed(MaxCoarseSpeed);
 
   // set acceleration
   alt.setAcceleration(1);
@@ -254,9 +256,9 @@ void loop() {
       break;
     case TRACK:
       if (!trackingStartTime) trackingStartTime = millis();
-      if (currentRes != FineAdjRes) {
-        setRes(FineAdjRes);
-      }
+      // if (currentRes != FineAdjRes) {
+      //   setRes(FineAdjRes);
+      // }
       trackingElapsedTime = (millis() - trackingStartTime) * 100000;
       altAzTrack(trackingElapsedTime);
       break;
