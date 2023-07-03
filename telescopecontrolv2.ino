@@ -1,5 +1,6 @@
 #include <AccelStepper.h>
 #include <SiderealPlanets.h>
+#include <LiquidCrystal.h>
 
 // ====== PIN ASSIGNMENTS ======
 
@@ -27,6 +28,14 @@
 // Mode switch button pin
 #define ModeBtn 7  // for leonardo, 3 for uno
 
+// LCD Pins
+#define LCD_RS 15
+#define LCD_EN 14
+#define LCD_D4 3
+#define LCD_D5 4
+#define LCD_D6 5
+#define LCD_D7 6
+
 // ====== OTHER CONSTANTS ======
 
 // Joystick detection Threshold
@@ -46,18 +55,24 @@
 // #define CoarseAdjRes MaxStepRes / 4
 
 // Max speed in steps/sec
-#define MaxFineSpeed 100
+#define MaxFineSpeed 32
 #define MaxCoarseSpeed 2000
+
+// steps per revolution accounting for microsteps
+const int stepsPerRevolution = 200 * 32;
 
 // Length of a sidereal day in milliseconds
 #define SiderealDayMillis 86164090.5
 
 // Angular velocity of Earth
-const double EarthAngularVel = (2 * PI) / (24 * 60 * 60 * 1000);
+const double EarthAngularVel = (2 * PI) / SiderealDayMillis;
 
 // initialize the steppers
 AccelStepper az(AccelStepper::DRIVER, AltStep, AltDir);
 AccelStepper alt(AccelStepper::DRIVER, AzStep, AzDir);
+
+// init LCD
+LiquidCrystal lcd(LCD_RS, LCD_EN, LCD_D4, LCD_D5, LCD_D6, LCD_D7);
 
 // time when tracking began in millis
 long trackingStartTime;
@@ -65,23 +80,21 @@ long trackingElapsedTime;
 
 // possible program states
 enum State {
-  CALIBRATE,  // find polaris in setup
-  STICK,      // using joystick
-  MANUAL,     // by hand, disable steppers
-  AUTOAIM,    // autoaim + track planets
-  TRACK       // track current position
+  NORTH,    // find north to get 0,0
+  POLARIS,  // find polaris
+  STICK,    // aim using joystick
+  MANUAL,   // aim by hand, disable steppers
+  AUTOAIM,  // autoaim + track planets
+  TRACK     // track current position
 };
 
 // program current state
 volatile State currentState;
 
-// steps per revolution accounting for microsteps
-volatile int stepsPerRevolution;
-
 volatile bool fine = false;
 
 // vars for simple tracking
-double altRad, azRad, radDistToPole, altTarget, azTarget;
+double altRad, azRad, radDistToPole, altDisplacement, azDisplacement, altTarget, azTarget;
 
 // are the steppers enabled
 bool enabled = true;
@@ -99,63 +112,68 @@ enum Objects {
   URANUS,
   NEPTUNE
 };
-
+*/
 struct Coord {
-  // alt az in degrees
-  double alt;
-  double az;
+  // alt az in radians
+  double alt;  // alt in radians
+  double az;   // az in radians
   // ra dec
-  double ra; // RA in hrs
-  double dec; // Dec in deg
+  double ra;   // RA in hrs
+  double dec;  // Dec in deg
   // // rise set in hrs since midnight
   // double rise;
   // double set;
 };
 
-Coord planet;
-*/
+Coord Polaris;
 
-// Set the resolution (microsteps/step) of the steppers. The res pins are common to both so it is only done once.
-// Resolution is 1-32, powers of 2.
-// void setRes(int res = 32) {
-//   int x = log(res) / log(2);
-//   digitalWrite(M0, (x & 1) == 0 ? LOW : HIGH);
-//   digitalWrite(M1, (x & 2) == 0 ? LOW : HIGH);
-//   digitalWrite(M2, (x & 4) == 0 ? LOW : HIGH);
-//   currentRes = res;
-// }
+
 
 // Joystick interrupt service routine to switch between coarse and fine manual control
 void changeSpeed() {
-  //   if (currentRes == CoarseAdjRes) {
-  //     // fine adjustment state
-  //     setRes(FineAdjRes);
-  //     stepsPerRevolution = 200 * FineAdjRes;
-  //   } else if (currentRes == FineAdjRes) {
-  //     // coarse adjustment state
-  //     setRes(CoarseAdjRes);
-  //     stepsPerRevolution = 200 * CoarseAdjRes;
-  //   }
   fine = !fine;
+  lcd.setCursor(0, 1);
+  lcd.print(fine ? "Fine  " : "Coarse");
 }
 
 // ISR to switch modes from calibration/polaris aiming to tracking
 void changeMode() {
+  lcd.clear();
+  lcd.setCursor(0, 0);
   switch (currentState) {
-    case CALIBRATE:
-      currentState = STICK;
+    case NORTH:
+      currentState = POLARIS;
       // set current pos as 0
       alt.setCurrentPosition(0);
       az.setCurrentPosition(0);
+
+      lcd.print("Aim at Polaris");
       break;
+    case POLARIS:
+      currentState = STICK;
+      // store alt/az coordinates of Polaris
+      Polaris.alt = alt.currentPosition() * PI * 2 / stepsPerRevolution / AzGearRatio;
+      Polaris.az = az.currentPosition() * PI * 2 / stepsPerRevolution / AzGearRatio;
+
+      lcd.print("StickCtrl: ");
     case STICK:
       currentState = TRACK;
+      // Alt/Az distance to polaris in radians: Current steps / steps/rev -> stepper revolutions, / GearRatio -> Telescope revolutions, * 2PI -> Telescope angle in radians
+      altRad = 2 * PI * alt.currentPosition() / stepsPerRevolution / AltGearRatio;
+      azRad = 2 * PI * az.currentPosition() / stepsPerRevolution / AzGearRatio;
+
+      altDisplacement = altRad - Polaris.alt;
+      azDisplacement = azRad - Polaris.az;
+
+      // use spherical law of cosines to get angular distance in rad to Polaris - cos c = cos a * cos b
+      radDistToPole = acos(cos(altDisplacement) * cos(azDisplacement)) * 1.;
+      lcd.print("Tracking");
       break;
     case TRACK:
       currentState = STICK;
+      altRad = azRad = altDisplacement = azDisplacement = radDistToPole = altTarget = azTarget = 0;
       break;
   }
-  Serial.println(currentState);
 }
 
 // Read the x/y values of the joystick and move the motors accordingly
@@ -181,35 +199,30 @@ void stickControl() {
     az.setSpeed(0);
     alt.setSpeed(0);
   }
+  alt.run();
+  az.run();
 }
 
-// use current alt az position (difference from Polaris) to calculate distance to Polaris, then use maths and current time to calculate angles
-void altAzTrack(double elapsedTime) {
-  // Alt/Az distance to polaris in radians: Current steps / steps/rev -> stepper revolutions, / GearRatio -> Telescope revolutions, * 2PI -> Telescope angle in radians
-  altRad = alt.currentPosition() / stepsPerRevolution / AltGearRatio * (2 * PI);
-  azRad = az.currentPosition() / stepsPerRevolution / AzGearRatio * (2 * PI);
-  Serial.print("Rads: ");
-  Serial.print(altRad);
-  Serial.print(",");
-  Serial.println(azRad);
-  delay(200);
-
-  // use spherical law of cosines to get angular distance in rad to Polaris - cos c = cos a * cos b
-  radDistToPole = acos(cos(altRad) * cos(azRad));
-  Serial.println(radDistToPole);
-
+// Possible tracking method
+// use current alt az position (difference from Polaris) to calculate distance to Polaris, then use maths and elapsed time to calculate angles
+void altAzTrack(long elapsedTime) {
   // calculate the absolute target then translate to steps - Credit to ChatGPT
-  altTarget = (radDistToPole * sin(EarthAngularVel * elapsedTime)) / (2 * PI) * AltGearRatio * stepsPerRevolution;
-  azTarget = (atan2(sin(EarthAngularVel * elapsedTime), cos(EarthAngularVel * elapsedTime) * cos(radDistToPole)) + PI / 2) / (2 * PI) * AltGearRatio * stepsPerRevolution;
+  //altTarget = (radDistToPole * sin(EarthAngularVel * elapsedTime)) / (2 * PI) * AltGearRatio * stepsPerRevolution;
+  //azTarget = (atan2(sin(EarthAngularVel * elapsedTime), cos(EarthAngularVel * elapsedTime) * cos(radDistToPole)) + PI / 2) / (2 * PI) * AltGearRatio * stepsPerRevolution;
+  altTarget = (altRad * 1. + Polaris.alt + radDistToPole * sin(radDistToPole * (elapsedTime * 1. / 1000))) / stepsPerRevolution / AltGearRatio / (2 * PI);
+  azTarget = (azRad * 1. + Polaris.az + radDistToPole * cos(radDistToPole * (elapsedTime * 1. / 1000))) / stepsPerRevolution / AzGearRatio / (2 * PI);
 
-  alt.moveTo(altTarget);
-  az.moveTo(azTarget);
+  alt.move(altTarget);
+  az.move(azTarget);
+  alt.run();
+  az.run();
 }
 
 void setup() {
   // init serial for debugging
-  Serial.begin(9600);
-  delay(2000);
+  // Serial.begin(9600);
+  lcd.begin(16, 2);
+  //delay(2000);
 
   // set joystick pin modes to input
   pinMode(JoystickX, INPUT);
@@ -234,33 +247,36 @@ void setup() {
   alt.setAcceleration(1);
   az.setAcceleration(1);
 
-  currentState = CALIBRATE;
+  currentState = NORTH;
+
+  lcd.print("Aim North Horiz");
 }
 
 void loop() {
+  lcd.setCursor(0, 1);
   // if not tracking, reset tracking start time
-  if (currentState != TRACK && trackingStartTime) trackingStartTime = 0;
-
+  if (currentState != TRACK) trackingStartTime = 0;
   switch (currentState) {
-    case CALIBRATE:
+    case NORTH:
+    case POLARIS:
     case STICK:
       stickControl();
-      alt.run();
-      az.run();
+      // lcd.print(alt.currentPosition() * 1. / stepsPerRevolution / AltGearRatio * 360);
+      // lcd.print(",");
+      // lcd.print(az.currentPosition() * 1. / stepsPerRevolution / AzGearRatio * 360);
       break;
-    case MANUAL:
-      // already did stuff
-      break;
-    case AUTOAIM:
+      //case MANUAL:
+      // stepper.disableoutputs?
+      // break;
+      //case AUTOAIM:
       // request positions from esp8266 and move accordingly
-      break;
+      // break;
     case TRACK:
-      if (!trackingStartTime) trackingStartTime = millis();
-      // if (currentRes != FineAdjRes) {
-      //   setRes(FineAdjRes);
-      // }
-      trackingElapsedTime = (millis() - trackingStartTime) * 100000;
+      if (trackingStartTime == 0) trackingStartTime = millis();
+      // trackingElapsedTime = (millis() - trackingStartTime)*1000;
+      trackingElapsedTime += 1000;
       altAzTrack(trackingElapsedTime);
+      lcd.print(trackingElapsedTime / 1000 / 100);
       break;
   }
 }
